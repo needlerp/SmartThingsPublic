@@ -45,6 +45,7 @@ metadata {
             state "battery", label:'${currentValue}% battery', unit:""
         }
         
+       
         main "FGK"
         details(["FGK","battery"])
     }
@@ -193,9 +194,36 @@ def zwaveEvent(physicalgraph.zwave.commands.versionv1.VersionReport cmd) {
     log.debug "zWaveProtocolSubVersion: ${cmd.zWaveProtocolSubVersion}"
 }
 
+
+/**
+ *  COMMAND_CLASS_CONFIGURATION (0x70) : ConfigurationReport
+ *
+ *  Configuration reports tell us the current parameter values stored in the physical device.
+ *
+ *  Due to platform security restrictions, the relevent preference value cannot be updated with the actual
+ *  value from the device, instead all we can do is output to the SmartThings IDE Log for verification.
+ **/
+def zwaveEvent(physicalgraph.zwave.commands.configurationv2.ConfigurationReport cmd) {
+    if (state.debug) log.trace "${device.displayName}: zwaveEvent(): ConfigurationReport received: ${cmd}"
+    // Translate cmd.configurationValue to an int. This should be returned from zwave.parse() as
+    // cmd.scaledConfigurationValue, but it hasn't been implemented by SmartThings yet! :/
+    //  See: https://community.smartthings.com/t/zwave-configurationv2-configurationreport-dev-question/9771
+    def scaledConfigurationValue = byteArrayToInt(cmd.configurationValue)
+    log.info "${device.displayName}: Parameter #${cmd.parameterNumber} has value: ${cmd.configurationValue} (${scaledConfigurationValue})"
+}
+
+
 def zwaveEvent(physicalgraph.zwave.commands.deviceresetlocallyv1.DeviceResetLocallyNotification cmd) {
 	log.info "${device.displayName}: received command: $cmd - device has reset itself"
 }
+
+def installed() {
+	configure
+    }
+    
+def updated() {
+	configure
+    }
 
 def configure() {
 	log.debug "Executing 'configure'"
@@ -209,8 +237,16 @@ def configure() {
     cmds += zwave.batteryV1.batteryGet()
     cmds += zwave.associationV2.associationSet(groupingIdentifier:1, nodeId: [zwaveHubNodeId])
     cmds += zwave.wakeUpV2.wakeUpNoMoreInformation()
+// Added script here to reverse setting of switch from normally open to normally closed
+//	cmds += zwave.configurationV2.configurationGet(parameterNumber: 2) //.format()
+//    cmds += zwave.configurationV1.configurationSet(scaledConfigurationValue: 1, parameterNumber: 2, size: 1)
+	cmds += zwave.configurationV2.configurationGet(parameterNumber: 2) //.format()
+//	cmds += zwave.switchMultilevelV3.switchMultilevelGet()
     
     encapSequence(cmds, 500)
+    
+    
+
 }
 
 private secure(physicalgraph.zwave.Command cmd) {
@@ -236,4 +272,16 @@ private encap(physicalgraph.zwave.Command cmd) {
     } else {
     	crc16(cmd)
     }
+}
+/**
+ *  byteArrayToInt(byteArray)
+ *
+ *  Converts an unsigned byte array to a int.
+ *  Should use ByteBuffer, but it's not available in SmartThings.
+ **/
+private byteArrayToInt(byteArray) {
+    // return java.nio.ByteBuffer.wrap(byteArray as byte[]).getInt()
+    def i = 0
+    byteArray.reverse().eachWithIndex { b, ix -> i += b * (0x100 ** ix) }
+    return i
 }
